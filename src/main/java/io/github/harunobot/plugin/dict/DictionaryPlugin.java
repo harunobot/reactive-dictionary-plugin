@@ -91,7 +91,7 @@ public class DictionaryPlugin extends HarunoPlugin  {
             );
             handlers.put(matcher, (String trait, BotEvent event) -> {
                 LOG.info("event message length: {}", event.messages().length);
-                String keyword = event.messages()[0].data().trim().substring(trait.length());
+                String keyword = event.messages()[0].data().trim();
                 if(!caches.containsKey(keyword)){
                     return null;
                 }
@@ -236,10 +236,15 @@ public class DictionaryPlugin extends HarunoPlugin  {
                                         , records.toArray(
                                                 new Record[records.size()])));
                     });
-                    randomCaches.put(generateRandomKey(item.getKey(), i), randomDict);
+                    String randomKeyword = config.getPrefix() + generateRandomKey(item.getKey(), i);
+                    if(randomCaches.containsKey(randomKeyword)){
+                        LOG.warn("duplicate random key: {}", randomKeyword);
+                    }
+                    randomCaches.put(randomKeyword, randomDict);
                 }
             }
-            caches.put(item.getKey(), new MessageWrapper(config.getName(), messages, (config.getGroups()!=null)));
+            String keyword = config.getPrefix()+item.getKey();
+            caches.put(keyword, new MessageWrapper(config.getName(), messages, (config.getGroups()!=null)));
         }
     }
     
