@@ -13,11 +13,12 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.harunobot.plugin.HarunoPlugin;
 import io.github.harunobot.plugin.PluginHandler;
 import io.github.harunobot.plugin.data.PluginDescription;
-import io.github.harunobot.plugin.data.PluginMatcher;
+import io.github.harunobot.plugin.data.PluginHandlerMatcher;
 import io.github.harunobot.plugin.data.PluginRegistration;
 import io.github.harunobot.plugin.data.type.Permission;
 import io.github.harunobot.plugin.data.type.PluginMatcherType;
 import io.github.harunobot.plugin.data.type.PluginReceivedType;
+import io.github.harunobot.plugin.data.type.PluginRecivevType;
 import io.github.harunobot.plugin.data.type.PluginTextType;
 import io.github.harunobot.plugin.dict.configuration.Configuration;
 import io.github.harunobot.plugin.dict.configuration.GroupLimitation;
@@ -69,6 +70,7 @@ public class DictionaryPlugin extends HarunoPlugin  {
     
     private SecureRandom random = new SecureRandom();
     private String path;
+    boolean enable = false;
     
     public DictionaryPlugin(){
         super(new PluginDescription.Builder().id("io.github.harunobot.plugin.dict").name(PLUGIN_NAME).version("0.1.0").build());
@@ -78,43 +80,58 @@ public class DictionaryPlugin extends HarunoPlugin  {
     public PluginRegistration onLoad(String path) throws Exception {
         MDC.put("module", PLUGIN_NAME);
         this.path = path;
-        Set<Permission> permissions = new HashSet();
-        Map<PluginMatcher, PluginHandler> handlers = new HashMap();
+        Map<PluginHandlerMatcher, PluginHandler> handlers = new HashMap();
         configure();
         
+        Set<Permission> permissions = new HashSet<>(
+                Arrays.asList(
+                        Permission.TRANSMIT_PUBLIC_MESSAGE
+                        , Permission.RECEIVE_PUBLIC_MESSAGE
+                        , Permission.MUTE
+                )
+        );
         prefixs.forEach((name, prefix) -> {
-            PluginMatcher matcher = new PluginMatcher(
-                new HashSet<>(Arrays.asList(PluginReceivedType.GROUP)),
+            PluginHandlerMatcher matcher = new PluginHandlerMatcher(
+                PluginRecivevType.PUBLIC,
                 PluginMatcherType.TEXT,
                 PluginTextType.PREFIX,
                 prefix
             );
             handlers.put(matcher, (String trait, BotEvent event) -> {
-                LOG.info("event message length: {}", event.messages().length);
+                if(!enable){
+                    return null;
+                }
                 String keyword = event.messages()[0].data().trim();
                 if(!caches.containsKey(keyword)){
                     return null;
                 }
                 MessageWrapper wrapper = caches.get(keyword);
-                if(wrapper.isLimited() && !allow(event, wrapper)){
+                int alivetime = -1;
+                if(wrapper.isLimited() && (alivetime = allow(event, wrapper)) == -1){
                     return null;
                 }
 //                revokeMuteUser(event);
-                return fastReply(RequestType.MESSAGE_PUBLIC
-                        , generateResponse(event, keyword, wrapper.getMessages()));
+                if(alivetime > 0){
+                    return fastReply(RequestType.MESSAGE_PUBLIC
+                            , generateResponse(event, keyword, wrapper.getMessages())
+                            , alivetime);
+                } else {
+                    return fastReply(RequestType.MESSAGE_PUBLIC
+                            , generateResponse(event, keyword, wrapper.getMessages()));
+                }
             });
         });
         MDC.clear();
-        return new PluginRegistration(permissions, handlers);
+        return new PluginRegistration(permissions, handlers, null);
     }
     
-    private boolean allow(BotEvent event, MessageWrapper wrapper){
+    private int allow(BotEvent event, MessageWrapper wrapper){
 //        Configuration config = configurations.get(wrapper.getName());
         long groupId = event.groupId();
         String groupKey = generateGroupKey(wrapper.getName(), groupId);
         GroupLimitation limitation = limitations.get(groupKey);
         if(limitation == null){
-            return false;
+            return -1;
         }
         if(limitation.getMuteDuration() > 0){
             muteUser(event, limitation.getMuteDuration());
@@ -126,12 +143,12 @@ public class DictionaryPlugin extends HarunoPlugin  {
             }
             count++;
             if(count > limitation.getFrequency()){
-                return false;
+                return -1;
             }
             ratelimit.get(groupKey).put(event.userId(), count);
-            return true;
+            return limitation.getAlivetime()>0?limitation.getAlivetime():0;
         }
-        return true;
+        return 0;
     }
     
     private BotMessage[] generateResponse(BotEvent event, String key, BotMessage[] cache){
@@ -298,6 +315,7 @@ public class DictionaryPlugin extends HarunoPlugin  {
             return messageBuilder.build();
         }
         if(record.getRecordType() == RecordType.TEXT){
+//            messageBuilder.data(convertEscape(record.getText()));
             messageBuilder.data(record.getText());
             return messageBuilder.build();
         }
@@ -312,12 +330,16 @@ public class DictionaryPlugin extends HarunoPlugin  {
         return messageBuilder.build();
     }
     
+    private String convertEscape(String string){
+        return string.replaceAll("\\n", "\n");
+    }
+    
     private MessageContentType convertContentType(RecordType recordType){
         if(recordType == RecordType.IMAGE){
             return MessageContentType.IMAGE;
         }
         if(recordType == RecordType.AUDIO){
-            return MessageContentType.RECORD;
+            return MessageContentType.AUDIO;
         }
         if(recordType == RecordType.VIDEO){
             return MessageContentType.VIDEO;
@@ -333,65 +355,32 @@ public class DictionaryPlugin extends HarunoPlugin  {
         }
         return MessageContentType.TEXT;
     }
-    
-    public boolean readIni(){
-        String file = path+"/词库.yaml";
-//        ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
-        try {
-            Map<String, BotMessagePojo[]> _caches = mapper.readValue(Files.readString(new File(file).toPath(), StandardCharsets.UTF_8), new TypeReference<Map<String, BotMessagePojo[]>>() {});
-            _caches.forEach((key, values) -> {
-                List<BotMessage> messages = new ArrayList(values.length*2-2);
-                for(int i=0; i<values.length; i++){
-                    BotMessage.Builder messageBuilder = new BotMessage.Builder();
-                    messageBuilder.messageType(values[i].getMessageType());
-                    if(values[i].getMessageType() == MessageContentType.MENTION){
-                        messages.add(messageBuilder.build());
-                        continue;
-                    }
-                    if(values[i].getMessageType() == MessageContentType.IMAGE){
-                        messageBuilder.file("file:///srv/haruno/plugin/io.github.harunobot.plugin.kancolle.ca/image/"+values[i].getFile());
-                        messages.add(messageBuilder.build());
-                        if(i*2<values.length*2){
-                            messages.add(NEW_LINE);
-                        }
-                        continue;
-                    }
-                    if(values[i].getMessageType() == MessageContentType.TEXT){
-                        messageBuilder.data(values[i].getData());
-                        messages.add(messageBuilder.build());
-                        if(i*2<values.length*2){
-                            messages.add(NEW_LINE);
-                        }
-                        continue;
-                    }
-                }
-                caches.put(key, new MessageWrapper("", messages.toArray(new BotMessage[values.length*2-1]), false));
-            });
-            return true;
-        } catch (IOException ex) {
-            LOG.error("", ex);
-        }
-        return false;
-    }
 
     @Override
     public boolean onUnload() {
+        enable = false;
+        caches.clear();
+        caches = null;
+        randomCaches.clear();
+        randomCaches = null;
+        configurations.clear();
+        configurations = null;
+        resources.clear();
+        resources = null;
+        prefixs.clear();
+        prefixs = null;
+        limitations.clear();
+        limitations = null;
+        ratelimit.clear();
+        ratelimit = null;
+        mapper = null;
         return true;
     }
 
     @Override
     public boolean onEnable() {
+        enable = true;
         return true;
-    }
-
-    @Override
-    public void set() {
-        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
-    }
-
-    @Override
-    public String get() {
-        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
     }
     
 }
