@@ -15,21 +15,22 @@ import io.github.harunobot.plugin.PluginHandler;
 import io.github.harunobot.plugin.data.PluginDescription;
 import io.github.harunobot.plugin.data.PluginHandlerMatcher;
 import io.github.harunobot.plugin.data.PluginRegistration;
-import io.github.harunobot.plugin.data.type.Permission;
+import io.github.harunobot.pojo.type.Permission;
 import io.github.harunobot.plugin.data.type.PluginMatcherType;
 import io.github.harunobot.plugin.data.type.PluginReceivedType;
-import io.github.harunobot.plugin.data.type.PluginRecivevType;
+import io.github.harunobot.plugin.data.type.PluginReceivedType;
 import io.github.harunobot.plugin.data.type.PluginTextType;
 import io.github.harunobot.plugin.dict.configuration.Configuration;
 import io.github.harunobot.plugin.dict.configuration.GroupLimitation;
 import io.github.harunobot.plugin.dict.data.MessageWrapper;
-import io.github.harunobot.plugin.dict.data.Record;
+import io.github.harunobot.plugin.dict.data.DictionaryRecord;
 import io.github.harunobot.plugin.dict.data.type.RecordType;
 import io.github.harunobot.pojo.BotMessagePojo;
 import io.github.harunobot.proto.event.BotEvent;
 import io.github.harunobot.proto.event.BotMessage;
 import io.github.harunobot.proto.event.type.MessageContentType;
 import io.github.harunobot.proto.request.type.RequestType;
+import io.github.harunobot.proto.response.BotResponse;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -92,12 +93,12 @@ public class DictionaryPlugin extends HarunoPlugin  {
         );
         prefixs.forEach((name, prefix) -> {
             PluginHandlerMatcher matcher = new PluginHandlerMatcher(
-                PluginRecivevType.PUBLIC,
+                PluginReceivedType.PUBLIC,
                 PluginMatcherType.TEXT,
                 PluginTextType.PREFIX,
                 prefix
             );
-            handlers.put(matcher, (String trait, BotEvent event) -> {
+            handlers.put(matcher, (String trait, String message, BotEvent event) -> {
                 if(!enable){
                     return null;
                 }
@@ -146,9 +147,8 @@ public class DictionaryPlugin extends HarunoPlugin  {
                 return -1;
             }
             ratelimit.get(groupKey).put(event.userId(), count);
-            return limitation.getAlivetime()>0?limitation.getAlivetime():0;
         }
-        return 0;
+        return limitation.getAlivetime()>0?limitation.getAlivetime():0;
     }
     
     private BotMessage[] generateResponse(BotEvent event, String key, BotMessage[] cache){
@@ -236,22 +236,18 @@ public class DictionaryPlugin extends HarunoPlugin  {
                 .append("/")
                 .append(config.getFile())
                 .toString();
-        Map<String, Record[]> dict
-                = mapper.readValue(
-                        Files.readString(new File(file).toPath(), StandardCharsets.UTF_8)
-                        , new TypeReference<Map<String, Record[]>>() {});
-        for (Map.Entry<String, Record[]> item : dict.entrySet()) {
+        Map<String, DictionaryRecord[]> dict
+                = mapper.readValue(Files.readString(new File(file).toPath(), StandardCharsets.UTF_8)
+                        , new TypeReference<Map<String, DictionaryRecord[]>>() {});
+        for (Map.Entry<String, DictionaryRecord[]> item : dict.entrySet()) {
             BotMessage[] messages = convertBotMessages(config.getName(), item.getValue());
             for(int i=0; i<messages.length;i++){
                 if(messages[i].messageType() == MessageContentType.RANDOM){
-                    List<List<Record>> entries = item.getValue()[i].getEntry();
+                    List<List<DictionaryRecord>> entries = item.getValue()[i].getEntry();
                     List<BotMessage[]> randomDict = new ArrayList(entries.size());
                     entries.forEach((records) -> {
-                        randomDict.add(
-                                convertBotMessages(
-                                        config.getName()
-                                        , records.toArray(
-                                                new Record[records.size()])));
+                        randomDict.add(convertBotMessages(config.getName()
+                                        , records.toArray(new DictionaryRecord[records.size()])));
                     });
                     String randomKeyword = config.getPrefix() + generateRandomKey(item.getKey(), i);
                     if(randomCaches.containsKey(randomKeyword)){
@@ -273,14 +269,14 @@ public class DictionaryPlugin extends HarunoPlugin  {
         return new StringBuilder().append(key).append("-").append(groupId).toString();
     }
     
-    private BotMessage[] convertBotMessages(String name, Record[] records){
+    private BotMessage[] convertBotMessages(String name, DictionaryRecord[] records){
         List<BotMessage> messages = new ArrayList(records.length*2);
         for(int i=0; i<records.length; i++){
             messages.add(convertBotMessage(name, records[i]));
-//            if(records[i].getRecordType() == RecordType.TEXT
-//                    || records[i].getRecordType() == RecordType.IMAGE
-//                    || records[i].getRecordType() == RecordType.RECORD
-//                    || records[i].getRecordType() == RecordType.VIDEO){
+//            if(records[i].getRecord() == RecordType.TEXT
+//                    || records[i].getRecord() == RecordType.IMAGE
+//                    || records[i].getRecord() == RecordType.RECORD
+//                    || records[i].getRecord() == RecordType.VIDEO){
 //                if(i*2<records.length*2){
 //                    messages.add(NEW_LINE);
 //                }
@@ -289,13 +285,13 @@ public class DictionaryPlugin extends HarunoPlugin  {
         return messages.toArray(new BotMessage[messages.size()]);
     }
     
-    private BotMessage convertBotMessage(String name, Record record){
+    private BotMessage convertBotMessage(String name, DictionaryRecord record){
         BotMessage.Builder messageBuilder = new BotMessage.Builder();
-        messageBuilder.messageType(convertContentType(record.getRecordType()));
-        if(record.getRecordType() == RecordType.MENTION){
+        messageBuilder.messageType(convertContentType(record.getRecord()));
+        if(record.getRecord() == RecordType.MENTION){
             return messageBuilder.build();
         }
-        if(record.getRecordType() == RecordType.IMAGE){
+        if(record.getRecord() == RecordType.IMAGE){
             messageBuilder.file(new StringBuilder()
                     .append("file://")
                     .append(resources.get(name))
@@ -305,7 +301,7 @@ public class DictionaryPlugin extends HarunoPlugin  {
                 //        messageBuilder.file("file:///srv/haruno/plugin/io.github.harunobot.plugin.kancolle.ca/image/"+item.getValue()[i].getFile());
             return messageBuilder.build();
         }
-        if(record.getRecordType() == RecordType.AUDIO){
+        if(record.getRecord() == RecordType.AUDIO){
             messageBuilder.file(new StringBuilder()
                     .append("file://")
                     .append(resources.get(name))
@@ -314,17 +310,17 @@ public class DictionaryPlugin extends HarunoPlugin  {
                     .toString());
             return messageBuilder.build();
         }
-        if(record.getRecordType() == RecordType.TEXT){
+        if(record.getRecord() == RecordType.TEXT){
 //            messageBuilder.data(convertEscape(record.getText()));
             messageBuilder.data(record.getText());
             return messageBuilder.build();
         }
-        if(record.getRecordType() == RecordType.RANDOM){
+        if(record.getRecord() == RecordType.RANDOM){
             return messageBuilder.build();
         }
         messageBuilder.messageType(MessageContentType.TEXT);
         messageBuilder.data(new StringBuilder()
-                .append(record.getRecordType())
+                .append(record.getRecord())
                 .append(" can not be convert yet")
                 .toString());
         return messageBuilder.build();

@@ -12,26 +12,12 @@ import java.util.List;
  *
  * @author iTeam_VEP
  */
-public class Record {
-    private RecordType recordType;
+public class DictionaryRecord {
+    private RecordType record;
     private String text;
     private String file;
     private String url;
-    private List<List<Record>> entry;
-
-    /**
-     * @return the recordType
-     */
-    public RecordType getRecordType() {
-        return recordType;
-    }
-
-    /**
-     * @param recordType the recordType to set
-     */
-    public void setRecordType(RecordType recordType) {
-        this.recordType = recordType;
-    }
+    private List<List<DictionaryRecord>> entry;
 
     /**
      * @return the text
@@ -78,15 +64,29 @@ public class Record {
     /**
      * @return the entry
      */
-    public List<List<Record>> getEntry() {
+    public List<List<DictionaryRecord>> getEntry() {
         return entry;
     }
 
     /**
      * @param entry the entry to set
      */
-    public void setEntry(List<List<Record>> entry) {
+    public void setEntry(List<List<DictionaryRecord>> entry) {
         this.entry = entry;
+    }
+
+    /**
+     * @return the record
+     */
+    public RecordType getRecord() {
+        return record;
+    }
+
+    /**
+     * @param record the record to set
+     */
+    public void setRecord(RecordType record) {
+        this.record = record;
     }
 
 }
